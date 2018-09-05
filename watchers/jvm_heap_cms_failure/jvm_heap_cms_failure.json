@@ -1,0 +1,102 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "1m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          ".monitoring-es-*"
+        ],
+        "types": [],
+        "body": {
+          "aggs": {
+            "host": {
+              "terms": {
+                "field": "source_node.name",
+                "order": {
+                  "heap_usage": "desc"
+                }
+              },
+              "aggs": {
+                "heap_usage": {
+                  "max": {
+                    "field": "node_stats.jvm.mem.heap_used_percent"
+                  }
+                }
+              }
+            }
+          },
+          "query": {
+            "bool": {
+              "must": [
+                {
+                  "range": {
+                    "timestamp": {
+                      "gte": "now-{{ctx.metadata.window_period}}"
+                    }
+                  }
+                },
+                {
+                  "range": {
+                    "node_stats.jvm.mem.heap_used_percent": {
+                      "gte": "{{ctx.metadata.threshold}}"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "size": 0
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.hits.total": {
+        "gt": 0
+      }
+    }
+  },
+  "actions": {
+    "log": {
+      "logging": {
+        "level": "info",
+        "text": {
+          "source": "nodes over {{ctx.payload.threshold}}% JVM Heap utilized:\n\n\t{{#ctx.payload.hosts}}{{heap_usage}}%-{{host}}\n\t{{/ctx.payload.hosts}}",
+          "lang": "mustache"
+        }
+      }
+    },
+    "send_mail": {
+      "throttle_period_in_millis": 300000,
+      "email": {
+        "profile": "standard",
+        "to": [
+        ],
+        "subject": "ElasticSearch JVM Heap GC Failure Alert",
+        "body": {
+          "text": {
+            "source": "Java VM Garbage collection failing to recover heap on the following node(s):\n\n{{#ctx.payload.hosts}}\t{{host}}: {{heap_usage}}%\n{{/ctx.payload.hosts}}\n",
+            "lang": "mustache"
+          }
+        }
+      }
+    }
+  },
+  "metadata": {
+    "window_period": "5m",
+    "threshold": 80
+  },
+  "transform": {
+    "script": {
+      "source": "return [ 'threshold': (int)ctx.metadata.threshold, 'hosts': ctx.payload.aggregations.host.buckets.stream().map(p -> [ 'host': p.key, 'heap_usage': (int)p.heap_usage.value]).collect(Collectors.toList()) ];",
+      "lang": "painless"
+    }
+  },
+  "throttle_period_in_millis": 300000
+}

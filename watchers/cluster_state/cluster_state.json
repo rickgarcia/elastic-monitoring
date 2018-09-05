@@ -1,0 +1,118 @@
+{
+    "trigger": {
+      "schedule": {
+        "interval": "60s"
+      }
+    },
+    "input": {
+      "search": {
+        "request": {
+          "search_type": "query_then_fetch",
+          "indices": [
+            ".monitoring-es*"
+          ],
+          "types": [
+            "doc"
+          ],
+          "body": {
+            "query": {
+              "bool": {
+                "filter": {
+                  "bool": {
+                    "must": [
+                      {
+                        "range": {
+                          "timestamp": {
+                            "gte": "now-{{ctx.metadata.not_green_secs}}s"
+                          }
+                        }
+                      },
+                      {
+                        "term": {
+                          "type": "cluster_state"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "aggs": {
+              "clusters": {
+                "terms": {
+                  "field": "cluster_uuid",
+                  "size": 100
+                },
+                "aggs": {
+                  "cluster_state": {
+                    "filters": {
+                      "filters": {
+                        "yellow": {
+                          "term": {
+                            "cluster_state.status": "yellow"
+                          }
+                        },
+                        "red": {
+                          "term": {
+                            "cluster_state.status": "red"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "latest_state": {
+                    "top_hits": {
+                      "size": 1,
+                      "sort": [
+                        {
+                          "timestamp": {
+                            "order": "desc"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "size": 0
+          }
+        }
+      }
+    },
+    "condition": {
+      "script": {
+        "id": "monitoring_cluster_health_condition"
+      }
+    },
+    "transform": {
+      "script": {
+        "id": "monitoring_cluster_health_transform"
+      }
+    },
+    "throttle_period_in_millis": 1800000,
+    "actions": {
+      "log": {
+        "logging": {
+          "level": "info",
+          "text": "Clusters that have not NOT been green for more than {{ctx.metadata.not_green_secs}}s: {{#ctx.payload._value}}{{cluster_id}}-{{cluster_state}}{{/ctx.payload._value}}:"
+        }
+      },
+      "send_mail": {
+        "email": {
+          "profile": "standard",
+          "to": [
+          ],
+          "subject": "ElasticSearch Cluster Status Alert",
+          "body": {
+            "text": "The following clusters have been out of green status for {{ctx.metadata.not_green_secs}} seconds:\n\n Cluster Name\tCluster Status\n{{#ctx.payload._value}}\t{{cluster_name}}\t{{cluster_state}}\n{{/ctx.payload._value}}"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "monitoring_update_interval": 10,
+      "name": "Cluster State",
+      "not_green_secs": 60
+    }
+}

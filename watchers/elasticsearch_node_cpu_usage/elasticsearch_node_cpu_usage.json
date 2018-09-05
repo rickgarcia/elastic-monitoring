@@ -1,0 +1,102 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "1m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          ".monitoring-es-*"
+        ],
+        "types": [],
+        "body": {
+          "aggs": {
+            "host": {
+              "terms": {
+                "field": "source_node.name",
+                "order": {
+                  "cpu_usage": "desc"
+                }
+              },
+              "aggs": {
+                "cpu_usage": {
+                  "max": {
+                    "field": "node_stats.process.cpu.percent"
+                  }
+                }
+              }
+            }
+          },
+          "query": {
+            "bool": {
+              "must": [
+                {
+                  "range": {
+                    "timestamp": {
+                      "gte": "now-{{ctx.metadata.window_period}}"
+                    }
+                  }
+                },
+                {
+                  "range": {
+                    "node_stats.process.cpu.percent": {
+                      "gte": "{{ctx.metadata.threshold}}"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "size": 0
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.hits.total": {
+        "gt": 0
+      }
+    }
+  },
+  "actions": {
+    "log": {
+      "logging": {
+        "level": "info",
+        "text": {
+          "source": "{{ctx.metadata.window_period}}m CPU average over {{ctx.metadata.threshold}}% on the following node(s): {{#ctx.payload.hosts}} {{host}}:{{cpu_usage}}% {{/ctx.payload.hosts}}",
+          "lang": "mustache"
+        }
+      }
+    },
+    "send_mail": {
+      "throttle_period_in_millis": 300000,
+      "email": {
+        "profile": "standard",
+        "to": [
+        ],
+        "subject": "ElasticSearch Node CPU Usage Alert",
+        "body": {
+          "text": {
+            "source": "Average CPU Usage has exceeded {{ctx.metadata.threshold}}% over the last {{ctx.metadata.window_period}}m on the following node(s):\n\n{{#ctx.payload.hosts}}\t{{host}}: {{cpu_usage}}%\n{{/ctx.payload.hosts}}\n",
+            "lang": "mustache"
+          }
+        }
+      }
+    }
+  },
+  "metadata": {
+    "window_period": "15m",
+    "threshold": 90
+  },
+  "transform": {
+    "script": {
+      "source": "return [ 'threshold': (int)ctx.metadata.threshold, 'hosts': ctx.payload.aggregations.host.buckets.stream().map(p -> [ 'host': p.key, 'cpu_usage': (int)p.cpu_usage.value]).collect(Collectors.toList()) ];",
+      "lang": "painless"
+    }
+  },
+  "throttle_period_in_millis": 300000
+}

@@ -1,0 +1,102 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "1m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          "metricbeat-*"
+        ],
+        "types": [],
+        "body": {
+          "aggs": {
+            "host": {
+              "terms": {
+                "field": "beat.hostname",
+                "order": {
+                  "mem_usage": "desc"
+                }
+              },
+              "aggs": {
+                "mem_usage": {
+                  "avg": {
+                    "field": "system.memory.actual.used.pct"
+                  }
+                }
+              }
+            }
+          },
+          "query": {
+            "bool": {
+              "must": [
+                {
+                  "range": {
+                    "@timestamp": {
+                      "gte": "now-{{ctx.metadata.window_period}}"
+                    }
+                  }
+                },
+                {
+                  "range": {
+                    "system.memory.actual.used.pct": {
+                      "gte": "{{ctx.metadata.threshold}}"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "size": 0
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.hits.total": {
+        "gt": 0
+      }
+    }
+  },
+  "actions": {
+    "log": {
+      "logging": {
+        "level": "info",
+        "text": {
+          "source": "nodes over {{ctx.payload.threshold}}% system memory utilized:\n\n\t{{#ctx.payload.hosts}}{{mem_usage}}%-{{host}}\n\t{{/ctx.payload.hosts}}",
+          "lang": "mustache"
+        }
+      }
+    },
+    "send_mail": {
+      "throttle_period_in_millis": 300000,
+      "email": {
+        "profile": "standard",
+        "to": [
+        ],
+        "subject": "ElasticSearch Node System Memory Alert",
+        "body": {
+          "text": {
+            "source": "System memory {{ctx.metadata.window_period}}m usage average has exceeded {{ctx.payload.threshold}}% on the following node(s):\n\n{{#ctx.payload.hosts}}\t{{host}}: {{mem_usage}}%\n{{/ctx.payload.hosts}}\n",
+            "lang": "mustache"
+          }
+        }
+      }
+    }
+  },
+  "metadata": {
+    "window_period": "15m",
+    "threshold": 0.9
+  },
+  "transform": {
+    "script": {
+      "source": "return [ 'threshold': (int)(ctx.metadata.threshold * 100), 'hosts': ctx.payload.aggregations.host.buckets.stream().map(p -> [ 'host': p.key, 'mem_usage': (int)(p.mem_usage.value * 100)]).collect(Collectors.toList()) ];",
+      "lang": "painless"
+    }
+  },
+  "throttle_period_in_millis": 300000
+}

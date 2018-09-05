@@ -1,0 +1,113 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "5m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          "metricbeat-*"
+        ],
+        "types": [],
+        "body": {
+          "aggs": {
+            "host": {
+              "terms": {
+                "field": "beat.hostname",
+                "order": {
+                  "disk_usage": "desc"
+                }
+              },
+              "aggs": {
+                "disk_usage": {
+                  "max": {
+                    "field": "system.filesystem.used.pct"
+                  }
+                }
+              }
+            }
+          },
+          "query": {
+            "bool": {
+              "must": [
+                {
+                  "term": {
+                    "fields.cluster": "{{ctx.metadata.cluster_name}}"
+                  }
+                },
+                {
+                  "term": {
+                    "system.filesystem.mount_point": "{{ctx.metadata.filesystem}}"
+                  }
+                },
+                {
+                  "range": {
+                    "@timestamp": {
+                      "gte": "now-{{ctx.metadata.window_period}}"
+                    }
+                  }
+                },
+                {
+                  "range": {
+                    "system.filesystem.used.pct": {
+                      "gte": "{{ctx.metadata.threshold}}"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "size": 0
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.hits.total": {
+        "gt": 0
+      }
+    }
+  },
+  "actions": {
+    "log": {
+      "logging": {
+        "level": "info",
+        "text": {
+          "source": "Some hosts are over {{ctx.payload.threshold}}% utilized:\n\n\t{{#ctx.payload.hosts}}{{disk_usage}}%-{{host}}\n\t{{/ctx.payload.hosts}}",
+          "lang": "mustache"
+        }
+      }
+    },
+    "send_mail": {
+      "throttle_period_in_millis": 3600000,
+      "email": {
+        "profile": "standard",
+        "to": [
+        ],
+        "subject": "ElasticSearch Filesystem Usage Status Alert",
+        "body": {
+          "text": {
+            "source": "Cluster: {{ctx.metadata.cluster_name}}\nFilesystem: {{ctx.metadata.filesystem}}\nThreshold: {{ctx.payload.threshold}}%\n\nAffected Nodes:\n{{#ctx.payload.hosts}}\t{{host}}: {{disk_usage}}%\n{{/ctx.payload.hosts}}",
+            "lang": "mustache"
+          }
+        }
+      }
+    }
+  },
+  "metadata": {
+    "cluster_name": "ops_voice_sat",
+    "window_period": "5m",
+    "threshold": 0.8,
+    "filesystem": "/esdata"
+  },
+  "transform": {
+    "script": {
+      "id": "filesystem_usage_transform"
+    }
+  },
+  "throttle_period_in_millis": 300000
+}

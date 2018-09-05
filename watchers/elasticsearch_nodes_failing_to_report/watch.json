@@ -1,0 +1,100 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "5m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          ".monitoring-es-6*"
+        ],
+        "types": [
+          "doc"
+        ],
+        "body": {
+          "query": {
+            "range": {
+              "timestamp": {
+                "gte": "now-{{ctx.metadata.window_period}}"
+              }
+            }
+          },
+          "aggs": {
+            "periods": {
+              "filters": {
+                "filters": {
+                  "history": {
+                    "range": {
+                      "timestamp": {
+                        "gte": "now-{{ctx.metadata.window_period}}"
+                      }
+                    }
+                  },
+                  "last_period": {
+                    "range": {
+                      "timestamp": {
+                        "gte": "now-{{ctx.metadata.last_period}}"
+                      }
+                    }
+                  }
+                }
+              },
+              "aggs": {
+                "hosts": {
+                  "terms": {
+                    "field": "source_node.name",
+                    "size": 1000
+                  }
+                }
+              }
+            }
+          },
+          "size": 0
+        }
+      }
+    }
+  },
+  "condition": {
+    "script": {
+      "id": "compare_buckets"
+    }
+  },
+  "actions": {
+    "log": {
+      "transform": {
+        "script": {
+          "id": "filter_buckets"
+        }
+      },
+      "logging": {
+        "level": "info",
+        "text": "Systems not responding in the last {{ctx.metadata.last_period}}:{{#ctx.payload._value}}{{.}}:{{/ctx.payload._value}}"
+      }
+    },
+    "send_email": {
+      "throttle_period_in_millis": 21600000,
+      "transform": {
+        "script": {
+          "id": "filter_buckets"
+        }
+      },
+      "email": {
+        "profile": "standard",
+        "to": [
+        ],
+        "subject": "ELK Nodes failed to report",
+        "body": {
+          "text": "The following ELK nodes have not posted data within the last {{ctx.metadata.last_period}}: \n\n{{#ctx.payload._value}}{{.}}\n{{/ctx.payload._value}}"
+        }
+      }
+    }
+  },
+  "metadata": {
+    "last_period": "5m",
+    "window_period": "24h"
+  },
+  "throttle_period_in_millis": 300000
+}

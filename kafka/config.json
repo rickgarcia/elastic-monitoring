@@ -1,0 +1,10 @@
+{
+  "elasticsearch_server": "localhost",
+  "elasticsearch_port": 9200,
+  "elasticsearch_index": "kafka_consumer_groups",
+  "es_user":"",
+  "es_pass":"",
+  "kafka_bootstrap_server": "localhost",
+  "kafka_bootstrap_port": 9092,
+  "interval": 60
+}
